@@ -8,6 +8,39 @@ const EDU_ORDER = [
   'Graduate (Commerce)','B.Ed / D.El.Ed','Post Graduate','PhD'
 ]
 
+const EDUCATION_OPTIONS = [
+  '8th Pass','10th Pass','12th Pass','ITI / Vocational',
+  'Diploma / B.Tech','Graduate','B.Sc Nursing','B.Sc Agriculture',
+  'Graduate (Commerce)','B.Ed / D.El.Ed','Post Graduate','PhD'
+]
+
+const TYPE_OPTIONS = [
+  'Group A','Group B','Group C','Group D','Banking','Teaching',
+  'Medical / Healthcare','Technical','Defence & Paramilitary','State Police',
+  'Finance / Accounts','State PSC','Agriculture','Other'
+]
+
+const DEFAULT_MANUAL_FORM = {
+  title: '',
+  department: '',
+  state: 'Central Government',
+  education: 'Graduate',
+  type: 'Group C',
+  payScale: '',
+  vacancies: '1',
+  lastDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  ageLimit: '',
+  selectionProcess: '',
+  notifNo: '',
+  description: '',
+  applicationLink: ''
+}
+
+const ADMIN_CREDENTIALS = {
+  username: 'ramesh',
+  password: 'ramesh4783!!'
+}
+
 function deadlineInfo(dateStr) {
   const today = new Date(); today.setHours(0,0,0,0)
   const d = new Date(dateStr)
@@ -37,6 +70,11 @@ export default function Home() {
   const [logs, setLogs] = useState([])
   const [toast, setToast] = useState(null)
   const [dragover, setDragover] = useState(false)
+  const [activeTab, setActiveTab] = useState('upload')
+  const [manualForm, setManualForm] = useState(DEFAULT_MANUAL_FORM)
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false)
+  const [adminForm, setAdminForm] = useState({ username: '', password: '' })
+  const [adminError, setAdminError] = useState('')
   const [nextId, setNextId] = useState(200)
   const fileInputRef = useRef()
   const logEndRef = useRef()
@@ -75,6 +113,17 @@ export default function Home() {
 
   // scroll logs
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const saved = window.localStorage.getItem('jobportal-admin-auth')
+    if (saved === 'true') setIsAdminAuthenticated(true)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('jobportal-admin-auth', isAdminAuthenticated ? 'true' : 'false')
+  }, [isAdminAuthenticated])
 
   function addLog(msg, cls = '') {
     setLogs(prev => [...prev, { msg, cls }])
@@ -118,7 +167,7 @@ export default function Home() {
     })
   }
 
-  async function processText(text, filename) {
+  async function processText(text, filename, pdfUrl = '') {
     setProgress(50)
     setProgressLabel('Claude AI is reading the notification…')
     addLog('→ Sending to Claude AI (server-side, key is secure)…')
@@ -139,7 +188,7 @@ export default function Home() {
     addLog(`✓ Extracted ${data.count} job listing(s)`, 'ok')
 
     let idCounter = nextId
-    const newJobs = data.jobs.map(j => ({ ...j, id: idCounter++ }))
+    const newJobs = data.jobs.map(j => ({ ...j, id: idCounter++, pdfUrl }))
     setNextId(idCounter)
     setJobs(prev => [...newJobs, ...prev])
 
@@ -153,6 +202,10 @@ export default function Home() {
   }
 
   async function handleFile(file) {
+    if (!isAdminAuthenticated) {
+      showToast('Admin login required to upload PDFs.', 'error')
+      return
+    }
     if (!file || (file.type !== 'application/pdf' && !file.name?.toLowerCase().endsWith('.pdf'))) {
       showToast('Please select a valid PDF file', 'error')
       return
@@ -163,10 +216,21 @@ export default function Home() {
     setLogs([])
     addLog(`✓ Loaded "${file.name}" (${(file.size / 1024).toFixed(1)} KB)`, 'ok')
     try {
+      const formData = new FormData()
+      formData.append('pdf', file)
+      const uploadRes = await fetch('/api/upload-pdf', {
+        method: 'POST',
+        body: formData,
+      })
+      const uploadData = await uploadRes.json()
+      if (!uploadRes.ok || !uploadData.pdfUrl) {
+        throw new Error(uploadData.error || 'Failed to store PDF')
+      }
+
       const text = await extractText(file)
       addLog(`✓ Extracted ${text.length} characters of text`, 'ok')
       setProgress(35)
-      await processText(text, file.name)
+      await processText(text, file.name, uploadData.pdfUrl)
     } catch (err) {
       addLog(`✗ Error: ${err.message}`, 'error')
       showToast('Failed: ' + err.message, 'error')
@@ -175,6 +239,10 @@ export default function Home() {
   }
 
   async function loadSample(key) {
+    if (!isAdminAuthenticated) {
+      showToast('Admin login required to use sample uploads.', 'error')
+      return
+    }
     const text = SAMPLE_TEXTS[key]
     if (!text) return
     setUploading(true)
@@ -191,11 +259,99 @@ export default function Home() {
     }
   }
 
+  function handleAdminChange(e) {
+    const { name, value } = e.target
+    setAdminForm(prev => ({ ...prev, [name]: value }))
+  }
+
+  function handleAdminSubmit(e) {
+    e.preventDefault()
+    const normalizedPassword = adminForm.password.trim().replace(/^ad\s+/i, '')
+    if (adminForm.username.trim().toLowerCase() === ADMIN_CREDENTIALS.username && normalizedPassword === ADMIN_CREDENTIALS.password) {
+      setIsAdminAuthenticated(true)
+      setAdminError('')
+      setActiveTab('upload')
+      showToast('Admin access granted', 'success', 2500)
+    } else {
+      setAdminError('Invalid admin credentials. Please try again.')
+      showToast('Invalid admin credentials', 'error', 3000)
+    }
+  }
+
+  function handleLogout() {
+    setIsAdminAuthenticated(false)
+    setAdminForm({ username: '', password: '' })
+    setAdminError('')
+    setActiveTab('upload')
+    showToast('Admin logged out', 'info', 2200)
+  }
+
+  function openExternalLink(url) {
+    if (!url) return
+    const safeUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`
+    window.open(safeUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  function handleManualChange(e) {
+    const { name, value } = e.target
+    setManualForm(prev => ({ ...prev, [name]: value }))
+  }
+
+  function handleManualSubmit(e) {
+    e.preventDefault()
+    if (!isAdminAuthenticated) {
+      showToast('Admin login required to add jobs manually.', 'error')
+      return
+    }
+    if (!manualForm.title.trim() || !manualForm.department.trim()) {
+      showToast('Please enter at least a job title and department.', 'error')
+      return
+    }
+
+    const newJob = {
+      id: nextId,
+      fromPdf: false,
+      title: manualForm.title.trim(),
+      department: manualForm.department.trim(),
+      state: manualForm.state || 'Central Government',
+      education: manualForm.education || 'Graduate',
+      type: manualForm.type || 'Group C',
+      payScale: manualForm.payScale.trim() || 'As per notification',
+      vacancies: Number(manualForm.vacancies) || 1,
+      lastDate: manualForm.lastDate || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      icon: ['Banking','Teaching','Medical / Healthcare','Technical','Defence & Paramilitary','State Police','Finance / Accounts','Agriculture'].includes(manualForm.type) ? ({
+        Banking: '🏦',
+        Teaching: '📚',
+        'Medical / Healthcare': '🏥',
+        Technical: '⚙️',
+        'Defence & Paramilitary': '🛡️',
+        'State Police': '👮',
+        'Finance / Accounts': '📊',
+        Agriculture: '🌾'
+      }[manualForm.type]) : '📌',
+      notifNo: manualForm.notifNo.trim() || 'Manual Entry',
+      ageLimit: manualForm.ageLimit.trim() || 'As per notification',
+      selectionProcess: manualForm.selectionProcess.trim() || 'As per notification',
+      description: manualForm.description.trim() || `This job was added manually for ${manualForm.title.trim()}. Review the details and application process before applying.`,
+      applicationLink: manualForm.applicationLink.trim() || ''
+    }
+
+    setNextId(prev => prev + 1)
+    setJobs(prev => [newJob, ...prev])
+    setUploadOpen(false)
+    resetUpload()
+    showToast(`Added job: ${newJob.title}`, 'success', 4000)
+  }
+
   function resetUpload() {
     setUploading(false)
     setProgress(0)
     setProgressLabel('')
     setLogs([])
+    setActiveTab('upload')
+    setManualForm(DEFAULT_MANUAL_FORM)
+    setAdminForm({ username: '', password: '' })
+    setAdminError('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -222,6 +378,7 @@ export default function Home() {
         .sicon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.4); font-size: 15px; pointer-events: none; }
         .btn-upload-h { display: flex; align-items: center; gap: 6px; background: #FF6A00; color: white; border: none; border-radius: 8px; padding: 0 18px; height: 38px; font-size: 13px; font-weight: 600; white-space: nowrap; transition: background 0.15s; }
         .btn-upload-h:hover { background: #e55f00; }
+        .btn-ghost { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.12); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 0 12px; height: 38px; font-size: 13px; font-weight: 600; white-space: nowrap; }
 
         /* ── Layout ── */
         .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 60px; display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start; }
@@ -283,6 +440,8 @@ export default function Home() {
         .jvac strong { color: #1A1A18; }
         .btn-apply { background: #1A2744; color: white; border: none; border-radius: 7px; padding: 6px 16px; font-size: 12.5px; font-weight: 500; transition: background 0.12s; }
         .btn-apply:hover { background: #2D4070; }
+        .btn-secondary-compact { background: white; color: #1A2744; border: 1px solid #C8C8C2; border-radius: 7px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; }
+        .action-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
         .pdf-badge { position: absolute; top: 10px; right: 10px; background: #FF6A00; color: white; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.05em; }
 
         /* ── Empty ── */
@@ -305,6 +464,23 @@ export default function Home() {
         .drop-icon { font-size: 40px; margin-bottom: 12px; }
         .drop-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
         .drop-sub { font-size: 13px; color: #9A9A92; }
+        .modal-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .tab-btn { border: 1px solid #C8C8C2; background: white; color: #5A5A54; border-radius: 999px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
+        .tab-btn.active { background: #1A2744; color: white; border-color: #1A2744; }
+        .admin-box { background: #FAFAF8; border: 1px solid #E4E4E0; border-radius: 10px; padding: 16px; display: grid; gap: 10px; }
+        .admin-box h3 { font-size: 15px; margin: 0; color: #1A2744; }
+        .admin-box p { font-size: 13px; color: #5A5A54; margin: 0; }
+        .admin-error { color: #CC2200; font-size: 12px; font-weight: 600; }
+        .manual-form { display: grid; gap: 12px; }
+        .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .field { display: flex; flex-direction: column; gap: 6px; }
+        .field label { font-size: 12px; font-weight: 600; color: #5A5A54; }
+        .field input, .field select, .field textarea { border: 1px solid #C8C8C2; border-radius: 8px; padding: 9px 10px; font-size: 13px; outline: none; }
+        .field textarea { min-height: 90px; resize: vertical; }
+        .field.full { grid-column: 1 / -1; }
+        .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+        .btn-secondary { border: 1px solid #C8C8C2; background: white; color: #5A5A54; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
+        .btn-primary { border: none; background: #FF6A00; color: white; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
         .prog-wrap { margin-top: 20px; }
         .prog-label { font-size: 13px; color: #5A5A54; margin-bottom: 8px; }
         .prog-bar { height: 6px; background: #E4E4E0; border-radius: 99px; overflow: hidden; margin-bottom: 12px; }
@@ -347,9 +523,14 @@ export default function Home() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <button className="btn-upload-h" onClick={() => setUploadOpen(true)}>
-            📄 Upload PDF Notification
-          </button>
+          <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+            {isAdminAuthenticated && (
+              <button className="btn-ghost" onClick={handleLogout}>🔓 Logout</button>
+            )}
+            <button className="btn-upload-h" onClick={() => { setUploadOpen(true); if (!isAdminAuthenticated) { setAdminError(''); setAdminForm({ username: '', password: '' }) } }}>
+              📄 Upload PDF Notification
+            </button>
+          </div>
         </div>
       </header>
 
@@ -450,7 +631,15 @@ export default function Home() {
                       {' · '}Age: {j.ageLimit}
                       {' · '}Ref: {j.notifNo}
                     </div>
-                    <button className="btn-apply">Apply Now →</button>
+                    <div className="action-row">
+                      {(j.applicationLink || j.notifNo) && (
+                        <button className="btn-secondary-compact" onClick={() => openExternalLink(j.applicationLink || j.notifNo)}>🌐 Open Site</button>
+                      )}
+                      {(j.pdfUrl || j.applicationLink) && (
+                        <button className="btn-secondary-compact" onClick={() => openExternalLink(j.pdfUrl || j.applicationLink || '#')}>📄 Download PDF</button>
+                      )}
+                      <button className="btn-apply" onClick={() => openExternalLink(j.applicationLink || '#')}>Apply Now →</button>
+                    </div>
                   </div>
                 </div>
               )
@@ -471,42 +660,137 @@ export default function Home() {
             <button className="closebtn" onClick={() => { setUploadOpen(false); resetUpload() }}>✕</button>
           </div>
           <div className="ubody">
-            <div
-              className={`dropzone${dragover?' dragover':''}`}
-              onDragOver={e => { e.preventDefault(); setDragover(true) }}
-              onDragLeave={() => setDragover(false)}
-              onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]) }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="drop-icon">📑</div>
-              <div className="drop-title">Drop PDF here or click to browse</div>
-              <div className="drop-sub">Government job notifications, employment news, recruitment ads</div>
-              <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e => handleFile(e.target.files[0])} />
+            <div className="modal-tabs">
+              <button type="button" className={`tab-btn${activeTab === 'upload' ? ' active' : ''}`} onClick={() => setActiveTab('upload')}>📄 Upload PDF</button>
+              <button type="button" className={`tab-btn${activeTab === 'manual' ? ' active' : ''}`} onClick={() => setActiveTab('manual')}>✍️ Enter Job Details</button>
             </div>
 
-            {uploading && (
-              <div className="prog-wrap">
-                <div className="prog-label">{progressLabel}</div>
-                <div className="prog-bar"><div className="prog-fill" style={{width: progress+'%'}} /></div>
-                {logs.length > 0 && (
-                  <div className="alog">
-                    {logs.map((l,i) => (
-                      <div key={i} className={l.cls==='ok'?'log-ok':l.cls==='error'?'log-error':''}>{l.msg}</div>
-                    ))}
-                    <div ref={logEndRef} />
+            {!isAdminAuthenticated ? (
+              <form className="admin-box" onSubmit={handleAdminSubmit}>
+                <h3>Admin access required</h3>
+                <p>Use the credentials below to unlock PDF upload and manual job entry.</p>
+                <div className="form-grid">
+                  <div className="field full">
+                    <label>Username</label>
+                    <input name="username" value={adminForm.username} onChange={handleAdminChange} placeholder="ramesh" required />
+                  </div>
+                  <div className="field full">
+                    <label>Password</label>
+                    <input name="password" type="password" value={adminForm.password} onChange={handleAdminChange} placeholder="ramesh4783!!" required />
+                  </div>
+                </div>
+                {adminError && <div className="admin-error">{adminError}</div>}
+                <div className="form-actions">
+                  <button type="submit" className="btn-primary">Unlock Admin Panel</button>
+                </div>
+              </form>
+            ) : activeTab === 'upload' ? (
+              <>
+                <div
+                  className={`dropzone${dragover?' dragover':''}`}
+                  onDragOver={e => { e.preventDefault(); setDragover(true) }}
+                  onDragLeave={() => setDragover(false)}
+                  onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]) }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="drop-icon">📑</div>
+                  <div className="drop-title">Drop PDF here or click to browse</div>
+                  <div className="drop-sub">Government job notifications, employment news, recruitment ads</div>
+                  <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e => handleFile(e.target.files[0])} />
+                </div>
+
+                {uploading && (
+                  <div className="prog-wrap">
+                    <div className="prog-label">{progressLabel}</div>
+                    <div className="prog-bar"><div className="prog-fill" style={{width: progress+'%'}} /></div>
+                    {logs.length > 0 && (
+                      <div className="alog">
+                        {logs.map((l,i) => (
+                          <div key={i} className={l.cls==='ok'?'log-ok':l.cls==='error'?'log-error':''}>{l.msg}</div>
+                        ))}
+                        <div ref={logEndRef} />
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            <div className="samples">
-              <div className="samples-label">Or try a sample notification:</div>
-              <div className="sample-list">
-                {[['upsc','UPSC Civil Services 2025'],['rrb','RRB NTPC Group D'],['ssc','SSC CGL Multi-Post'],['state_police','State Police Recruitment'],['banking','IBPS PO / Clerk 2025']].map(([key,label]) => (
-                  <button key={key} className="stag" disabled={uploading} onClick={() => loadSample(key)}>{label}</button>
-                ))}
-              </div>
-            </div>
+                <div className="samples">
+                  <div className="samples-label">Or try a sample notification:</div>
+                  <div className="sample-list">
+                    {[['upsc','UPSC Civil Services 2025'],['rrb','RRB NTPC Group D'],['ssc','SSC CGL Multi-Post'],['state_police','State Police Recruitment'],['banking','IBPS PO / Clerk 2025']].map(([key,label]) => (
+                      <button key={key} className="stag" disabled={uploading} onClick={() => loadSample(key)}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <form className="manual-form" onSubmit={handleManualSubmit}>
+                <div className="form-grid">
+                  <div className="field full">
+                    <label>Job Title</label>
+                    <input name="title" value={manualForm.title} onChange={handleManualChange} placeholder="e.g. Junior Engineer" required />
+                  </div>
+                  <div className="field full">
+                    <label>Department / Organization</label>
+                    <input name="department" value={manualForm.department} onChange={handleManualChange} placeholder="e.g. Public Works Department" required />
+                  </div>
+                  <div className="field">
+                    <label>State</label>
+                    <select name="state" value={manualForm.state} onChange={handleManualChange}>
+                      {INDIA_STATES.map(state => <option key={state} value={state}>{state}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Education</label>
+                    <select name="education" value={manualForm.education} onChange={handleManualChange}>
+                      {EDUCATION_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Job Type</label>
+                    <select name="type" value={manualForm.type} onChange={handleManualChange}>
+                      {TYPE_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Vacancies</label>
+                    <input name="vacancies" type="number" min="1" value={manualForm.vacancies} onChange={handleManualChange} />
+                  </div>
+                  <div className="field">
+                    <label>Pay Scale</label>
+                    <input name="payScale" value={manualForm.payScale} onChange={handleManualChange} placeholder="₹35,000 – ₹1,10,000" />
+                  </div>
+                  <div className="field">
+                    <label>Last Date</label>
+                    <input name="lastDate" type="date" value={manualForm.lastDate} onChange={handleManualChange} />
+                  </div>
+                  <div className="field">
+                    <label>Age Limit</label>
+                    <input name="ageLimit" value={manualForm.ageLimit} onChange={handleManualChange} placeholder="18–35 years" />
+                  </div>
+                  <div className="field full">
+                    <label>Selection Process</label>
+                    <input name="selectionProcess" value={manualForm.selectionProcess} onChange={handleManualChange} placeholder="Written Exam → Interview" />
+                  </div>
+                  <div className="field">
+                    <label>Notification No.</label>
+                    <input name="notifNo" value={manualForm.notifNo} onChange={handleManualChange} placeholder="e.g. SSC/2025/123" />
+                  </div>
+                  <div className="field">
+                    <label>Application Link</label>
+                    <input name="applicationLink" value={manualForm.applicationLink} onChange={handleManualChange} placeholder="https://example.com/apply" />
+                  </div>
+                  <div className="field full">
+                    <label>Description</label>
+                    <textarea name="description" value={manualForm.description} onChange={handleManualChange} placeholder="Short summary shown on the card" />
+                  </div>
+                </div>
+                <div className="form-actions">
+                  <button type="button" className="btn-secondary" onClick={() => { setActiveTab('upload'); setManualForm(DEFAULT_MANUAL_FORM) }}>Cancel</button>
+                  <button type="submit" className="btn-primary">Add Job</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       </div>
