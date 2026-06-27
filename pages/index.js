@@ -80,6 +80,12 @@ export default function Home() {
   const logEndRef = useRef()
   const toastTimer = useRef()
 
+  const dashboardMode = isAdminAuthenticated ? 'admin' : 'user'
+  const dashboardTitle = isAdminAuthenticated ? 'Admin Dashboard' : 'Job Seeker Dashboard'
+  const dashboardSubtitle = isAdminAuthenticated
+    ? 'Upload notifications, add job listings, and manage recruitment updates from one place.'
+    : 'Browse government jobs, compare deadlines, and apply directly from the latest openings.'
+
   // ── Filtered & sorted jobs ──
   const displayed = (() => {
     let list = jobs.filter(j => {
@@ -201,6 +207,15 @@ export default function Home() {
     }, 1300)
   }
 
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('Could not read the selected PDF file'))
+      reader.readAsDataURL(file)
+    })
+  }
+
   async function handleFile(file) {
     if (!isAdminAuthenticated) {
       showToast('Admin login required to upload PDFs.', 'error')
@@ -216,11 +231,15 @@ export default function Home() {
     setLogs([])
     addLog(`✓ Loaded "${file.name}" (${(file.size / 1024).toFixed(1)} KB)`, 'ok')
     try {
-      const formData = new FormData()
-      formData.append('pdf', file)
+      const fileData = await fileToDataUrl(file)
       const uploadRes = await fetch('/api/upload-pdf', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          fileData,
+          mimeType: file.type || 'application/pdf'
+        })
       })
       const uploadData = await uploadRes.json()
       if (!uploadRes.ok || !uploadData.pdfUrl) {
@@ -286,8 +305,15 @@ export default function Home() {
     showToast('Admin logged out', 'info', 2200)
   }
 
-  function openExternalLink(url) {
+  function openActionLink(url, filename = 'document.pdf') {
     if (!url) return
+    if (url.startsWith('data:')) {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      return
+    }
     const safeUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`
     window.open(safeUrl, '_blank', 'noopener,noreferrer')
   }
@@ -379,6 +405,17 @@ export default function Home() {
         .btn-upload-h { display: flex; align-items: center; gap: 6px; background: #FF6A00; color: white; border: none; border-radius: 8px; padding: 0 18px; height: 38px; font-size: 13px; font-weight: 600; white-space: nowrap; transition: background 0.15s; }
         .btn-upload-h:hover { background: #e55f00; }
         .btn-ghost { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.12); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 0 12px; height: 38px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+        /* ── Dashboard banner ── */
+        .dashboard-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border-radius: 14px; margin-bottom: 18px; border: 1px solid #E4E4E0; background: linear-gradient(135deg, #F7FBF7 0%, #FFFFFF 100%); }
+        .dashboard-banner.admin { background: linear-gradient(135deg, #F9F0E9 0%, #FFF8F3 100%); border-color: #F0C89A; }
+        .dashboard-banner.user { background: linear-gradient(135deg, #F7FBF7 0%, #FFFFFF 100%); border-color: #DCECD8; }
+        .dashboard-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9A9A92; margin-bottom: 4px; }
+        .dashboard-title { font-size: 20px; font-weight: 700; color: #1A2744; }
+        .dashboard-sub { font-size: 13px; color: #5A5A54; margin-top: 4px; max-width: 640px; }
+        .dashboard-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .dashboard-note { font-size: 13px; color: #5A5A54; }
+        .dashboard-action { height: 36px; padding: 0 14px; }
 
         /* ── Layout ── */
         .page { max-width: 1200px; margin: 0 auto; padding: 24px 24px 60px; display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start; }
@@ -579,6 +616,24 @@ export default function Home() {
         {/* Main */}
         <main>
 
+          <div className={`dashboard-banner ${dashboardMode}`}>
+            <div>
+              <div className="dashboard-eyebrow">{isAdminAuthenticated ? 'Admin workspace' : 'Public portal'}</div>
+              <div className="dashboard-title">{dashboardTitle}</div>
+              <div className="dashboard-sub">{dashboardSubtitle}</div>
+            </div>
+            <div className="dashboard-actions">
+              {isAdminAuthenticated ? (
+                <>
+                  <button className="btn-upload-h dashboard-action" onClick={() => setUploadOpen(true)}>📄 Upload PDF</button>
+                  <button className="btn-ghost dashboard-action" onClick={() => setActiveTab('manual')}>✍️ Add Job</button>
+                </>
+              ) : (
+                <div className="dashboard-note">Use filters to discover the right opportunity quickly.</div>
+              )}
+            </div>
+          </div>
+
           {/* Stats */}
           <div className="stats-bar">
             <div className="scard"><div className="slabel">Total Jobs</div><div className="sval navy">{displayed.length}</div></div>
@@ -633,12 +688,12 @@ export default function Home() {
                     </div>
                     <div className="action-row">
                       {(j.applicationLink || j.notifNo) && (
-                        <button className="btn-secondary-compact" onClick={() => openExternalLink(j.applicationLink || j.notifNo)}>🌐 Open Site</button>
+                        <button className="btn-secondary-compact" onClick={() => openActionLink(j.applicationLink || j.notifNo, `${j.title || 'job'}.pdf`)}>🌐 Open Site</button>
                       )}
                       {(j.pdfUrl || j.applicationLink) && (
-                        <button className="btn-secondary-compact" onClick={() => openExternalLink(j.pdfUrl || j.applicationLink || '#')}>📄 Download PDF</button>
+                        <button className="btn-secondary-compact" onClick={() => openActionLink(j.pdfUrl || j.applicationLink || '#', `${j.title || 'job'}-notification.pdf`)}>📄 Download PDF</button>
                       )}
-                      <button className="btn-apply" onClick={() => openExternalLink(j.applicationLink || '#')}>Apply Now →</button>
+                      <button className="btn-apply" onClick={() => openActionLink(j.applicationLink || '#', `${j.title || 'job'}-application.pdf`)}>Apply Now →</button>
                     </div>
                   </div>
                 </div>
@@ -672,11 +727,11 @@ export default function Home() {
                 <div className="form-grid">
                   <div className="field full">
                     <label>Username</label>
-                    <input name="username" value={adminForm.username} onChange={handleAdminChange} placeholder="ramesh" required />
+                    <input name="username" value={adminForm.username} onChange={handleAdminChange} required />
                   </div>
                   <div className="field full">
                     <label>Password</label>
-                    <input name="password" type="password" value={adminForm.password} onChange={handleAdminChange} placeholder="ramesh4783!!" required />
+                    <input name="password" type="password" value={adminForm.password} onChange={handleAdminChange} required />
                   </div>
                 </div>
                 {adminError && <div className="admin-error">{adminError}</div>}
