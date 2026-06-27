@@ -220,7 +220,11 @@ export default function AdminPage() {
 
       setProgress(45)
       setStatus('Extracting job details with AI…')
-      const text = await extractPdfText(file)
+      const extracted = await extractPdfText(file)
+      // If text extraction yields nothing (e.g. pdf.js not loaded, or a scanned
+      // PDF), fall back to the filename so the server still returns a job entry
+      // instead of rejecting an empty payload.
+      const text = extracted && extracted.trim() ? extracted : file.name
 
       const parseRes = await fetch('/api/parse-pdf', {
         method: 'POST',
@@ -281,6 +285,13 @@ export default function AdminPage() {
     await saveJobs(updated)
     setManualForm(DEFAULT_MANUAL_FORM)
     setToast('Job added successfully.')
+  }
+
+  async function handleDelete(id) {
+    const updated = jobs.filter(job => job.id !== id)
+    setJobs(updated)
+    await saveJobs(updated)
+    setToast('Job removed.')
   }
 
   const stats = useMemo(() => ({
@@ -373,6 +384,34 @@ export default function AdminPage() {
             </form>
           </section>
         </div>
+
+        <section style={{ ...styles.panel, marginTop: 20 }}>
+          <div style={styles.listHead}>
+            <h2 style={styles.panelTitle}>Current Job Listings ({jobs.length})</h2>
+            <button style={styles.secondaryBtn} onClick={loadJobs}>↻ Refresh</button>
+          </div>
+          {jobs.length === 0 ? (
+            <p style={styles.copy}>No jobs yet. Upload a PDF or add one manually above.</p>
+          ) : (
+            <div style={styles.jobTable}>
+              {jobs.map(job => (
+                <div key={job.id} style={styles.jobRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.jobTitle}>
+                      <span style={{ marginRight: 6 }}>{job.icon || '📌'}</span>
+                      {job.title}
+                      {job.fromPdf ? <span style={styles.pdfTag}>FROM PDF</span> : null}
+                    </div>
+                    <div style={styles.jobMeta}>
+                      {job.department} · {job.state} · {job.type} · {Number(job.vacancies) || 0} vacancies · closes {job.lastDate}
+                    </div>
+                  </div>
+                  <button style={styles.deleteBtn} onClick={() => handleDelete(job.id)}>🗑️ Delete</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
       {toast ? <div style={styles.toast}>{toast}</div> : null}
     </>
@@ -402,5 +441,12 @@ const styles = {
   progressBox: { height: 8, background: '#eef2f8', borderRadius: 999, overflow: 'hidden', marginTop: 12 },
   progressBar: { height: '100%', background: '#138808', transition: 'width 0.3s' },
   status: { marginTop: 10, color: '#138808', fontWeight: 600 },
-  toast: { position: 'fixed', bottom: 20, right: 20, background: '#1a2744', color: '#fff', padding: '12px 16px', borderRadius: 10 }
+  toast: { position: 'fixed', bottom: 20, right: 20, background: '#1a2744', color: '#fff', padding: '12px 16px', borderRadius: 10 },
+  listHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  jobTable: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 },
+  jobRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: '1px solid #e6eaf2', borderRadius: 10, background: '#fafbfe' },
+  jobTitle: { fontWeight: 600, color: '#1a2744', fontSize: 14, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  jobMeta: { fontSize: 12.5, color: '#5a5a54', marginTop: 3 },
+  pdfTag: { background: '#ff6a00', color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em' },
+  deleteBtn: { background: '#fdeceA', color: '#cc2200', border: '1px solid #f3c2b8', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, whiteSpace: 'nowrap', flexShrink: 0 }
 }
