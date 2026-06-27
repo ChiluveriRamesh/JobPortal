@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Head from 'next/head'
-import { SEED_JOBS, SAMPLE_TEXTS } from '../lib/data'
+import { SEED_JOBS, SAMPLE_TEXTS, INDIA_STATES } from '../lib/data'
 
 const EDU_ORDER = [
   '8th Pass','10th Pass','12th Pass','ITI / Vocational',
@@ -153,7 +153,7 @@ export default function Home() {
   }
 
   async function handleFile(file) {
-    if (!file || file.type !== 'application/pdf') {
+    if (!file || (file.type !== 'application/pdf' && !file.name?.toLowerCase().endsWith('.pdf'))) {
       showToast('Please select a valid PDF file', 'error')
       return
     }
@@ -277,6 +277,7 @@ export default function Home() {
         .tedu { background: #E6F5E6; color: #0a6006; }
         .ttype { background: #F3F0FF; color: #4A36A8; }
         .tpay { background: #FFF1E6; color: #994000; }
+        .jdesc { font-size: 13px; color: #5A5A54; line-height: 1.6; margin: 0 0 12px; padding: 10px 12px; background: #FAFAF8; border: 1px solid #E4E4E0; border-radius: 8px; }
         .jfooter { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #E4E4E0; padding-top: 10px; gap: 8px; }
         .jvac { font-size: 13px; color: #5A5A54; }
         .jvac strong { color: #1A1A18; }
@@ -442,6 +443,7 @@ export default function Home() {
                     <span className="tag ttype">🏷️ {j.type}</span>
                     <span className="tag tpay">💰 {j.payScale}</span>
                   </div>
+                  {j.description && <div className="jdesc">{j.description}</div>}
                   <div className="jfooter">
                     <div className="jvac">
                       Vacancies: <strong>{j.vacancies.toLocaleString('en-IN')}</strong>
