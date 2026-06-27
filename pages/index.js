@@ -60,7 +60,7 @@ function countBy(jobs, key) {
 }
 
 export default function Home() {
-  const [jobs, setJobs] = useState([])
+  const [jobs, setJobs] = useState(SEED_JOBS)
   const [filters, setFilters] = useState({ state: null, edu: null, type: null })
   const [sort, setSort] = useState('recent')
   const [search, setSearch] = useState('')
@@ -130,6 +130,8 @@ export default function Home() {
     if (typeof window === 'undefined') return
     const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
     if (savedAuth === 'true') setIsAdminAuthenticated(true)
+    
+    // Load persisted jobs from API (will override SEED_JOBS if jobs exist)
     loadJobs()
   }, [])
 
@@ -148,12 +150,14 @@ export default function Home() {
       }
       const data = await res.json()
       console.log('[Portal] Loaded', data.jobs?.length || 0, 'jobs from', data.storage)
-      if (Array.isArray(data.jobs)) {
+      // Only update if API returned actual jobs (not empty array)
+      if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+        console.log('[Portal] Replacing SEED_JOBS with persisted jobs')
         setJobs(data.jobs)
-        if (data.jobs.length > 0) {
-          const maxId = data.jobs.reduce((max, job) => Math.max(max, Number(job.id) || 0), 0)
-          setNextId(maxId + 1)
-        }
+        const maxId = data.jobs.reduce((max, job) => Math.max(max, Number(job.id) || 0), 0)
+        setNextId(maxId + 1)
+      } else {
+        console.log('[Portal] No persisted jobs found, keeping SEED_JOBS')
       }
     } catch (err) {
       console.error('[Portal] Job store load failed:', err.message)

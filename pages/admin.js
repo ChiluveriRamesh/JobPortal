@@ -88,8 +88,11 @@ export default function AdminPage() {
       const data = await res.json()
       console.log('[Admin] Loaded', data.jobs?.length || 0, 'jobs from', data.storage)
       if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+        console.log('[Admin] Replacing SEED_JOBS with persisted jobs')
         setJobs(data.jobs)
         return
+      } else {
+        console.log('[Admin] No persisted jobs found, keeping SEED_JOBS')
       }
     } catch (err) {
       console.error('[Admin] Failed to load shared jobs:', err.message)
