@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Head from 'next/head'
+import Link from 'next/link'
 import { SEED_JOBS, SAMPLE_TEXTS, INDIA_STATES } from '../lib/data'
 
 const EDU_ORDER = [
@@ -561,12 +562,18 @@ export default function Home() {
             />
           </div>
           <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-            {isAdminAuthenticated && (
-              <button className="btn-ghost" onClick={handleLogout}>🔓 Logout</button>
+            {isAdminAuthenticated ? (
+              <>
+                <button className="btn-ghost" onClick={handleLogout}>🔓 Logout</button>
+                <button className="btn-upload-h" onClick={() => setUploadOpen(true)}>
+                  📄 Upload PDF Notification
+                </button>
+              </>
+            ) : (
+              <Link href="/admin" className="btn-upload-h" style={{textDecoration:'none', display:'inline-flex', alignItems:'center', justifyContent:'center'}}>
+                🔐 Admin Panel
+              </Link>
             )}
-            <button className="btn-upload-h" onClick={() => { setUploadOpen(true); if (!isAdminAuthenticated) { setAdminError(''); setAdminForm({ username: '', password: '' }) } }}>
-              📄 Upload PDF Notification
-            </button>
           </div>
         </div>
       </header>

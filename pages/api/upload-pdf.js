@@ -1,3 +1,5 @@
+import { put } from '@vercel/blob';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -21,11 +23,22 @@ export default async function handler(req, res) {
       return res.status(413).json({ error: 'PDF is too large' });
     }
 
-    const pdfUrl = `data:${mimeType || 'application/pdf'};base64,${base64Data}`;
+    let pdfUrl = `data:${mimeType || 'application/pdf'};base64,${base64Data}`;
+    let storage = 'data-url';
+
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const uploadResult = await put(filename || 'uploaded.pdf', payload, {
+        access: 'public',
+        contentType: mimeType || 'application/pdf'
+      });
+      pdfUrl = uploadResult.url;
+      storage = 'vercel-blob';
+    }
 
     return res.status(200).json({
       success: true,
       pdfUrl,
+      storage,
       filename: filename || 'uploaded.pdf',
     });
   } catch (err) {
