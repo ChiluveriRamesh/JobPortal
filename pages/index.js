@@ -60,7 +60,7 @@ function countBy(jobs, key) {
 }
 
 export default function Home() {
-  const [jobs, setJobs] = useState(SEED_JOBS)
+  const [jobs, setJobs] = useState([])
   const [filters, setFilters] = useState({ state: null, edu: null, type: null })
   const [sort, setSort] = useState('recent')
   const [search, setSearch] = useState('')
@@ -140,16 +140,23 @@ export default function Home() {
 
   async function loadJobs() {
     try {
+      console.log('[Portal] Loading jobs from API...')
       const res = await fetch('/api/jobs-store')
-      if (!res.ok) throw new Error('Unable to load jobs')
+      if (!res.ok) {
+        console.warn('[Portal] Jobs API returned:', res.status)
+        throw new Error('Unable to load jobs')
+      }
       const data = await res.json()
-      if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+      console.log('[Portal] Loaded', data.jobs?.length || 0, 'jobs from', data.storage)
+      if (Array.isArray(data.jobs)) {
         setJobs(data.jobs)
-        const maxId = data.jobs.reduce((max, job) => Math.max(max, Number(job.id) || 0), 0)
-        setNextId(maxId + 1)
+        if (data.jobs.length > 0) {
+          const maxId = data.jobs.reduce((max, job) => Math.max(max, Number(job.id) || 0), 0)
+          setNextId(maxId + 1)
+        }
       }
     } catch (err) {
-      console.warn('Job store load failed:', err)
+      console.error('[Portal] Job store load failed:', err.message)
     } finally {
       setLoadingJobs(false)
     }
@@ -157,13 +164,16 @@ export default function Home() {
 
   async function saveJobs(newJobs) {
     try {
-      await fetch('/api/jobs-store', {
+      console.log('[Portal] Saving', newJobs.length, 'jobs to API...')
+      const res = await fetch('/api/jobs-store', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobs: newJobs })
       })
+      const data = await res.json()
+      console.log('[Portal] Jobs saved to', data.storage, '- Blob:', data.savedToBlob, 'File:', data.savedToFile)
     } catch (err) {
-      console.warn('Job store save failed:', err)
+      console.error('[Portal] Job store save failed:', err.message)
     }
   }
 

@@ -80,17 +80,19 @@ export default function AdminPage() {
 
   async function loadJobs() {
     try {
+      console.log('[Admin] Loading jobs from API...')
       const res = await fetch(JOBS_STORE_API)
       if (!res.ok) {
         throw new Error('Shared job store unavailable')
       }
       const data = await res.json()
+      console.log('[Admin] Loaded', data.jobs?.length || 0, 'jobs from', data.storage)
       if (Array.isArray(data.jobs) && data.jobs.length > 0) {
         setJobs(data.jobs)
         return
       }
     } catch (err) {
-      console.warn('Failed to load shared jobs:', err)
+      console.error('[Admin] Failed to load shared jobs:', err.message)
     }
 
     if (typeof window !== 'undefined') {
@@ -98,8 +100,9 @@ export default function AdminPage() {
       if (savedJobs) {
         try {
           setJobs(JSON.parse(savedJobs))
+          console.log('[Admin] Loaded jobs from localStorage fallback')
         } catch (err) {
-          console.warn('Unable to parse saved jobs fallback', err)
+          console.warn('[Admin] Unable to parse saved jobs fallback', err)
         }
       }
     }
@@ -107,6 +110,7 @@ export default function AdminPage() {
 
   async function saveJobs(newJobs) {
     try {
+      console.log('[Admin] Saving', newJobs.length, 'jobs to API...')
       const res = await fetch(JOBS_STORE_API, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -116,10 +120,13 @@ export default function AdminPage() {
         const errData = await res.json().catch(() => null)
         throw new Error(errData?.error || 'Failed to save jobs')
       }
+      const data = await res.json()
+      console.log('[Admin] Jobs saved to', data.storage)
     } catch (err) {
-      console.warn('Shared job save failed:', err)
+      console.error('[Admin] Shared job save failed:', err.message)
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newJobs))
+        console.log('[Admin] Saved to localStorage fallback')
       }
     }
   }

@@ -24,3 +24,6 @@ yarn-error.log*
 
 # Vercel
 .vercel
+
+# Job storage (server-side, local runtime data)
+.data/
