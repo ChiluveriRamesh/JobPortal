@@ -18,7 +18,7 @@ const PARSE_PROMPT = `You are a government job notification parser for India. Ex
   "department": "Organization/Department name",
   "state": "State name — MUST be one of: Central Government, Andhra Pradesh, Arunachal Pradesh, Assam, Bihar, Chhattisgarh, Goa, Gujarat, Haryana, Himachal Pradesh, Jharkhand, Karnataka, Kerala, Madhya Pradesh, Maharashtra, Manipur, Meghalaya, Mizoram, Nagaland, Odisha, Punjab, Rajasthan, Sikkim, Tamil Nadu, Telangana, Tripura, Uttar Pradesh, Uttarakhand, West Bengal, Delhi, Jammu & Kashmir, Ladakh, Puducherry, Chandigarh",
   "education": "MUST be one of: 8th Pass, 10th Pass, 12th Pass, ITI / Vocational, Diploma / B.Tech, BE, 10+2, Graduate, B.Sc Nursing, B.Sc Agriculture, Graduate (Commerce), B.Ed / D.El.Ed, Post Graduate, PhD",
-  "type": "MUST be one of: Group A, Group B, Group C, Group D, Banking, Teaching, Medical / Healthcare, Technical, Defence & Paramilitary, State Police, Finance / Accounts, State PSC, Agriculture, Doctor, Teacher, Scientist, Engineering, Research, Administrative, Clerical, Other",
+  "type": "MUST be one of: Group A, Group B, Group C, Group D, Banking, Teaching, Medical / Healthcare, Technical, Defence & Paramilitary, State Police, Finance / Accounts, State PSC, Agriculture, Doctor, Teacher, Scientist, Engineering, Research, Administrative, Clerical, Lecturers, Education, Other",
   "payScale": "Pay scale as string e.g. ₹35,000 - ₹1,10,000",
   "vacancies": <integer — total vacancies>,
   "lastDate": "YYYY-MM-DD",
@@ -26,7 +26,9 @@ const PARSE_PROMPT = `You are a government job notification parser for India. Ex
   "notifNo": "Notification number or reference code",
   "ageLimit": "Age limit string e.g. 18-75 years",
   "selectionProcess": "Brief selection steps",
-  "description": "A concise 2-3 sentence summary of the job vacancy for applicants"
+  "description": "A concise 2-3 sentence summary of the job vacancy for applicants",
+  "applicationLink": "Direct link to the official application page or PDF"
+  
 }
 
 If multiple posts exist, include all as separate objects.
