@@ -21,6 +21,8 @@ const TYPE_OPTIONS = [
   'Finance / Accounts','State PSC','Agriculture','Other'
 ]
 
+const STORAGE_KEY = 'jobportal-jobs'
+
 const DEFAULT_MANUAL_FORM = {
   title: '',
   department: '',
@@ -70,6 +72,8 @@ export default function Home() {
   const [progressLabel, setProgressLabel] = useState('')
   const [logs, setLogs] = useState([])
   const [toast, setToast] = useState(null)
+  const [toastAction, setToastAction] = useState(null)
+  const [toastActionLabel, setToastActionLabel] = useState('')
   const [dragover, setDragover] = useState(false)
   const [activeTab, setActiveTab] = useState('upload')
   const [manualForm, setManualForm] = useState(DEFAULT_MANUAL_FORM)
@@ -77,6 +81,8 @@ export default function Home() {
   const [adminForm, setAdminForm] = useState({ username: '', password: '' })
   const [adminError, setAdminError] = useState('')
   const [nextId, setNextId] = useState(200)
+  const [pendingUndo, setPendingUndo] = useState(null)
+  const undoTimer = useRef()
   const fileInputRef = useRef()
   const logEndRef = useRef()
   const toastTimer = useRef()
@@ -123,8 +129,17 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const saved = window.localStorage.getItem('jobportal-admin-auth')
-    if (saved === 'true') setIsAdminAuthenticated(true)
+    const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
+    if (savedAuth === 'true') setIsAdminAuthenticated(true)
+
+    const savedJobs = window.localStorage.getItem(STORAGE_KEY)
+    if (savedJobs) {
+      try {
+        setJobs(JSON.parse(savedJobs))
+      } catch (err) {
+        console.warn('Unable to parse saved jobs', err)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -132,14 +147,25 @@ export default function Home() {
     window.localStorage.setItem('jobportal-admin-auth', isAdminAuthenticated ? 'true' : 'false')
   }, [isAdminAuthenticated])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs))
+  }, [jobs])
+
   function addLog(msg, cls = '') {
     setLogs(prev => [...prev, { msg, cls }])
   }
 
-  function showToast(msg, type = 'info', dur = 3500) {
+  function showToast(msg, type = 'info', dur = 3500, actionLabel = '', actionFn = null) {
     setToast({ msg, type })
+    setToastActionLabel(actionLabel)
+    setToastAction(() => actionFn)
     clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), dur)
+    toastTimer.current = setTimeout(() => {
+      setToast(null)
+      setToastActionLabel('')
+      setToastAction(null)
+    }, dur)
   }
 
   function toggleFilter(key, val) {
@@ -304,6 +330,28 @@ export default function Home() {
     setAdminError('')
     setActiveTab('upload')
     showToast('Admin logged out', 'info', 2200)
+  }
+
+  function handleDeleteJob(jobId) {
+    setJobs(prev => {
+      const removed = prev.find(job => job.id === jobId)
+      if (!removed) return prev
+      setPendingUndo(removed)
+      showToast(
+        'Job removed. Undo?','info',
+        5000,
+        'Undo',
+        () => {
+          setJobs(current => [removed, ...current])
+          setPendingUndo(null)
+          setToast(null)
+          setToastActionLabel('')
+          setToastAction(null)
+          showToast('Delete undone.', 'success', 2500)
+        }
+      )
+      return prev.filter(job => job.id !== jobId)
+    })
   }
 
   function openActionLink(url, filename = 'document.pdf') {
@@ -519,6 +567,8 @@ export default function Home() {
         .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
         .btn-secondary { border: 1px solid #C8C8C2; background: white; color: #5A5A54; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
         .btn-primary { border: none; background: #FF6A00; color: white; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
+        .btn-danger { background: #CC2200; color: white; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; margin-left: 8px; }
+        .btn-danger:hover { background: #a71d00; }
         .prog-wrap { margin-top: 20px; }
         .prog-label { font-size: 13px; color: #5A5A54; margin-bottom: 8px; }
         .prog-bar { height: 6px; background: #E4E4E0; border-radius: 99px; overflow: hidden; margin-bottom: 12px; }
@@ -534,11 +584,13 @@ export default function Home() {
         .stag:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* ── Toast ── */
-        .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 18px; border-radius: 10px; font-size: 13.5px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 300; max-width: 380px; transition: transform 0.25s, opacity 0.25s; transform: translateY(80px); opacity: 0; }
+        .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 18px; border-radius: 10px; font-size: 13.5px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 300; max-width: 380px; transition: transform 0.25s, opacity 0.25s; transform: translateY(80px); opacity: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .toast.show { transform: translateY(0); opacity: 1; }
         .toast-info { background: #1A2744; color: white; }
         .toast-success { background: #138808; color: white; }
         .toast-error { background: #CC2200; color: white; }
+        .toast-action { background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.35); color: white; border-radius: 8px; padding: 6px 10px; cursor: pointer; font-weight: 700; }
+        .toast-action:hover { background: rgba(255,255,255,0.24); }
       `}</style>
 
       {/* Header */}
@@ -701,6 +753,9 @@ export default function Home() {
                         <button className="btn-secondary-compact" onClick={() => openActionLink(j.pdfUrl || j.applicationLink || '#', `${j.title || 'job'}-notification.pdf`)}>📄 Download PDF</button>
                       )}
                       <button className="btn-apply" onClick={() => openActionLink(j.applicationLink || '#', `${j.title || 'job'}-application.pdf`)}>Apply Now →</button>
+                      {isAdminAuthenticated && (
+                        <button className="btn-danger" onClick={() => handleDeleteJob(j.id)}>🗑️ Delete</button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -859,7 +914,15 @@ export default function Home() {
 
       {/* Toast */}
       {toast && (
-        <div className={`toast show toast-${toast.type}`}>{toast.msg}</div>
+        <div className={`toast show toast-${toast.type}`}>
+          <span>{toast.msg}</span>
+          {toastActionLabel && toastAction ? (
+            <button className="toast-action" onClick={() => {
+              toastAction()
+              clearTimeout(toastTimer.current)
+            }}>{toastActionLabel}</button>
+          ) : null}
+        </div>
       )}
     </>
   )
