@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { SEED_JOBS, INDIA_STATES } from '../lib/data'
+import { JOBS_STORAGE_KEY, readStoredJobs, writeStoredJobs } from '../lib/jobs-sync'
 
 const DEFAULT_MANUAL_FORM = {
   title: '',
@@ -19,7 +20,6 @@ const DEFAULT_MANUAL_FORM = {
   applicationLink: ''
 }
 
-const STORAGE_KEY = 'jobportal-jobs'
 const JOBS_STORE_API = '/api/jobs-store'
 const ADMIN_TOKEN_KEY = 'jobportal-admin-token'
 
@@ -114,7 +114,12 @@ export default function AdminPage() {
       if (Array.isArray(data.jobs) && data.jobs.length > 0) {
         console.log('[Admin] Replacing SEED_JOBS with persisted jobs')
         setJobs(data.jobs)
+        writeStoredJobs(data.jobs)
         return
+      }
+
+      if (Array.isArray(data.jobs) && data.jobs.length === 0) {
+        console.log('[Admin] API returned no jobs; keeping the latest stored list if present')
       } else {
         console.log('[Admin] No persisted jobs found, keeping SEED_JOBS')
       }
@@ -122,16 +127,10 @@ export default function AdminPage() {
       console.error('[Admin] Failed to load shared jobs:', err.message)
     }
 
-    if (typeof window !== 'undefined') {
-      const savedJobs = window.localStorage.getItem(STORAGE_KEY)
-      if (savedJobs) {
-        try {
-          setJobs(JSON.parse(savedJobs))
-          console.log('[Admin] Loaded jobs from localStorage fallback')
-        } catch (err) {
-          console.warn('[Admin] Unable to parse saved jobs fallback', err)
-        }
-      }
+    const savedJobs = readStoredJobs()
+    if (savedJobs) {
+      setJobs(savedJobs)
+      console.log('[Admin] Loaded jobs from localStorage fallback')
     }
   }
 
@@ -155,10 +154,8 @@ export default function AdminPage() {
       console.log('[Admin] Jobs saved to', data.storage)
     } catch (err) {
       console.error('[Admin] Shared job save failed:', err.message)
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newJobs))
-        console.log('[Admin] Saved to localStorage fallback')
-      }
+      writeStoredJobs(newJobs)
+      console.log('[Admin] Saved to localStorage fallback')
     }
   }
 
@@ -238,6 +235,7 @@ export default function AdminPage() {
       const newItems = (parseData.jobs || []).map((job, index) => ({ ...job, id: Date.now() + index, fromPdf: true, pdfUrl: uploadData.pdfUrl }))
       const updated = [...newItems, ...jobs]
       setJobs(updated)
+      writeStoredJobs(updated)
       await saveJobs(updated)
       setProgress(100)
       setStatus(`Added ${newItems.length} job listing(s).`)
@@ -282,6 +280,7 @@ export default function AdminPage() {
 
     const updated = [newJob, ...jobs]
     setJobs(updated)
+    writeStoredJobs(updated)
     await saveJobs(updated)
     setManualForm(DEFAULT_MANUAL_FORM)
     setToast('Job added successfully.')
@@ -290,6 +289,7 @@ export default function AdminPage() {
   async function handleDelete(id) {
     const updated = jobs.filter(job => job.id !== id)
     setJobs(updated)
+    writeStoredJobs(updated)
     await saveJobs(updated)
     setToast('Job removed.')
   }

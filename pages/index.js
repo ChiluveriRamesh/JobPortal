@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { SEED_JOBS } from '../lib/data'
+import { readStoredJobs, JOBS_STORAGE_KEY } from '../lib/jobs-sync'
 
 const EDU_ORDER = [
   '8th Pass','10th Pass','12th Pass','ITI / Vocational',
@@ -34,6 +35,23 @@ export default function Home() {
 
   useEffect(() => {
     loadJobs()
+
+    if (typeof window !== 'undefined') {
+      const syncJobs = () => {
+        const savedJobs = readStoredJobs()
+        if (savedJobs) {
+          setJobs(savedJobs)
+        }
+      }
+
+      window.addEventListener('storage', syncJobs)
+      window.addEventListener('jobportal-jobs-updated', syncJobs)
+
+      return () => {
+        window.removeEventListener('storage', syncJobs)
+        window.removeEventListener('jobportal-jobs-updated', syncJobs)
+      }
+    }
   }, [])
 
   async function loadJobs() {
@@ -43,9 +61,21 @@ export default function Home() {
       const data = await res.json()
       if (Array.isArray(data.jobs) && data.jobs.length > 0) {
         setJobs(data.jobs)
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(data.jobs))
+        }
+      } else {
+        const savedJobs = readStoredJobs()
+        if (savedJobs) {
+          setJobs(savedJobs)
+        }
       }
     } catch (err) {
       console.error('[Portal] Job store load failed:', err.message)
+      const savedJobs = readStoredJobs()
+      if (savedJobs) {
+        setJobs(savedJobs)
+      }
     }
   }
 
