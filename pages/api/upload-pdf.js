@@ -27,7 +27,9 @@ export default async function handler(req, res) {
     let storage = 'data-url';
 
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const uploadResult = await put(filename || 'uploaded.pdf', payload, {
+      const folder = (process.env.BLOB_FOLDER || 'uploads').replace(/^\/+|\/+$/g, '')
+      const remoteFilename = `${folder}/${filename || 'uploaded.pdf'}`
+      const uploadResult = await put(remoteFilename, payload, {
         access: 'public',
         contentType: mimeType || 'application/pdf'
       });

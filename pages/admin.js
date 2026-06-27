@@ -19,6 +19,8 @@ const DEFAULT_MANUAL_FORM = {
   applicationLink: ''
 }
 
+const STORAGE_KEY = 'jobportal-jobs'
+
 const ADMIN_CREDENTIALS = {
   username: 'ramesh',
   password: 'ramesh4783!!'
@@ -37,8 +39,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem('jobportal-admin-auth')
-      setIsLoggedIn(saved === 'true')
+      const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
+      setIsLoggedIn(savedAuth === 'true')
+      const savedJobs = window.localStorage.getItem(STORAGE_KEY)
+      if (savedJobs) {
+        try {
+          setJobs(JSON.parse(savedJobs))
+        } catch (err) {
+          console.warn('Unable to parse saved jobs', err)
+        }
+      }
     }
   }, [])
 
@@ -47,6 +57,12 @@ export default function AdminPage() {
       window.localStorage.setItem('jobportal-admin-auth', isLoggedIn ? 'true' : 'false')
     }
   }, [isLoggedIn])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs))
+    }
+  }, [jobs])
 
   useEffect(() => {
     if (!toast) return
