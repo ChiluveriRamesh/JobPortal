@@ -21,10 +21,22 @@ const DEFAULT_MANUAL_FORM = {
 
 const STORAGE_KEY = 'jobportal-jobs'
 const JOBS_STORE_API = '/api/jobs-store'
+const ADMIN_TOKEN_KEY = 'jobportal-admin-token'
 
-const ADMIN_CREDENTIALS = {
-  username: 'ramesh',
-  password: 'ramesh4783!!'
+function getStoredToken() {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(ADMIN_TOKEN_KEY) || ''
+}
+
+function tokenIsValid(token) {
+  if (!token) return false
+  try {
+    const [payload] = token.split('.')
+    const data = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return data.exp && Date.now() < data.exp
+  } catch {
+    return false
+  }
 }
 
 export default function AdminPage() {
@@ -40,17 +52,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
-      setIsLoggedIn(savedAuth === 'true')
+      if (tokenIsValid(getStoredToken())) {
+        setIsLoggedIn(true)
+      } else {
+        window.localStorage.removeItem(ADMIN_TOKEN_KEY)
+      }
     }
     loadJobs()
   }, [])
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('jobportal-admin-auth', isLoggedIn ? 'true' : 'false')
-    }
-  }, [isLoggedIn])
 
   useEffect(() => {
     if (!toast) return
@@ -58,22 +67,37 @@ export default function AdminPage() {
     return () => window.clearTimeout(id)
   }, [toast])
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault()
-    const normalizedPassword = form.password.trim().replace(/^ad\s+/i, '')
-    if (form.username.trim().toLowerCase() === ADMIN_CREDENTIALS.username && normalizedPassword === ADMIN_CREDENTIALS.password) {
+    try {
+      const res = await fetch('/api/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: form.username, password: form.password })
+      })
+      const data = await res.json()
+      if (!res.ok || !data.token) {
+        throw new Error(data.error || 'Invalid admin credentials.')
+      }
+      window.localStorage.setItem(ADMIN_TOKEN_KEY, data.token)
       setIsLoggedIn(true)
       setError('')
       setToast('Welcome back, admin.')
-    } else {
-      setError('Invalid admin credentials.')
-      setToast('Invalid admin credentials.')
+    } catch (err) {
+      setError(err.message || 'Invalid admin credentials.')
+      setToast(err.message || 'Invalid admin credentials.')
     }
   }
 
-  function handleLogout() {
+  function forceLogout(reason) {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(ADMIN_TOKEN_KEY)
     setIsLoggedIn(false)
     setForm({ username: '', password: '' })
+    if (reason) { setError(reason); setToast(reason) }
+  }
+
+  function handleLogout() {
+    forceLogout('')
     setError('')
     setToast('You have been logged out.')
   }
@@ -116,9 +140,13 @@ export default function AdminPage() {
       console.log('[Admin] Saving', newJobs.length, 'jobs to API...')
       const res = await fetch(JOBS_STORE_API, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
         body: JSON.stringify({ jobs: newJobs })
       })
+      if (res.status === 401) {
+        forceLogout('Session expired — please log in again.')
+        throw new Error('Unauthorized')
+      }
       if (!res.ok) {
         const errData = await res.json().catch(() => null)
         throw new Error(errData?.error || 'Failed to save jobs')
@@ -183,9 +211,10 @@ export default function AdminPage() {
       const base64 = arrayBufferToBase64(fileData)
       const uploadRes = await fetch('/api/upload-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
         body: JSON.stringify({ filename: file.name, fileData: `data:${file.type || 'application/pdf'};base64,${base64}`, mimeType: file.type || 'application/pdf' })
       })
+      if (uploadRes.status === 401) { forceLogout('Session expired — please log in again.'); throw new Error('Unauthorized') }
       const uploadData = await uploadRes.json()
       if (!uploadRes.ok || !uploadData.pdfUrl) throw new Error(uploadData.error || 'Upload failed')
 
@@ -195,10 +224,11 @@ export default function AdminPage() {
 
       const parseRes = await fetch('/api/parse-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
         body: JSON.stringify({ text, filename: file.name })
       })
 
+      if (parseRes.status === 401) { forceLogout('Session expired — please log in again.'); throw new Error('Unauthorized') }
       if (!parseRes.ok) throw new Error('AI parsing failed')
       const parseData = await parseRes.json()
       const newItems = (parseData.jobs || []).map((job, index) => ({ ...job, id: Date.now() + index, fromPdf: true, pdfUrl: uploadData.pdfUrl }))

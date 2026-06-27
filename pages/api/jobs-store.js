@@ -1,6 +1,7 @@
-import { list, put } from '@vercel/blob'
+import { get, put } from '@vercel/blob'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { requireAuth } from '../../lib/auth'
 
 export const config = {
   api: {
@@ -15,10 +16,48 @@ const jobsPath = `${folder}/jobs.json`
 const localDataDir = join(process.cwd(), '.data')
 const localJobsFile = join(localDataDir, 'jobs.json')
 
-async function findJobsBlob() {
-  const result = await list({ prefix: jobsPath, limit: 1 })
-  if (!result?.blobs?.length) return null
-  return result.blobs[0]
+// This Vercel Blob store is configured for PRIVATE access. We read/write via
+// the SDK with the read-write token (never an unauthenticated public URL),
+// so reads always work and are never served stale from a CDN edge.
+const BLOB_ACCESS = 'private'
+
+async function streamToString(stream) {
+  // The SDK returns a web ReadableStream; read it fully into a string.
+  if (stream && typeof stream.getReader === 'function') {
+    const reader = stream.getReader()
+    const chunks = []
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(typeof value === 'string' ? Buffer.from(value) : Buffer.from(value))
+    }
+    return Buffer.concat(chunks).toString('utf-8')
+  }
+  // Fallback for Node Readable (async iterable)
+  const chunks = []
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf-8')
+}
+
+async function loadJobsFromBlob() {
+  const result = await get(jobsPath, { access: BLOB_ACCESS })
+  if (!result || !result.stream) return null
+  const body = await streamToString(result.stream)
+  const parsed = JSON.parse(body)
+  return Array.isArray(parsed) ? parsed : null
+}
+
+async function saveJobsToBlob(jobs) {
+  await put(jobsPath, JSON.stringify(jobs), {
+    access: BLOB_ACCESS,
+    contentType: 'application/json',
+    // Overwrite the SAME file each time so reads find it; v2 requires this
+    // explicitly, otherwise it throws on an existing pathname.
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    // No CDN caching — every reader sees the latest write immediately.
+    cacheControlMaxAge: 0,
+  })
 }
 
 async function ensureDataDir() {
@@ -33,9 +72,10 @@ async function loadJobsFromFile() {
   try {
     await ensureDataDir()
     const content = await fs.readFile(localJobsFile, 'utf-8')
-    return JSON.parse(content)
+    const parsed = JSON.parse(content)
+    return Array.isArray(parsed) ? parsed : []
   } catch (err) {
-    console.warn('Could not load local jobs file:', err.message)
+    if (err.code !== 'ENOENT') console.warn('Could not load local jobs file:', err.message)
     return []
   }
 }
@@ -54,32 +94,26 @@ export default async function handler(req, res) {
     return res.status(200).end()
   }
 
-  console.log('[API] Jobs store', req.method, '| Blob token:', !!process.env.BLOB_READ_WRITE_TOKEN ? 'YES' : 'NO')
+  const hasToken = !!process.env.BLOB_READ_WRITE_TOKEN
+  console.log('[API] Jobs store', req.method, '| Blob token:', hasToken ? 'YES' : 'NO')
 
   if (req.method === 'GET') {
     try {
-      // Try Vercel Blob first if token is configured
-      if (process.env.BLOB_READ_WRITE_TOKEN) {
+      if (hasToken) {
         try {
-          console.log('[API] Looking for blob at:', jobsPath)
-          const blob = await findJobsBlob()
-          if (blob) {
-            console.log('[API] Found blob, fetching from:', blob.url.substring(0, 60) + '...')
-            const fetchRes = await fetch(blob.url)
-            if (fetchRes.ok) {
-              const jobs = await fetchRes.json()
-              console.log('[API] Loaded', jobs.length, 'jobs from Blob')
-              return res.status(200).json({ jobs, storage: 'blob', found: true })
-            }
-          } else {
-            console.log('[API] No blob found yet')
+          console.log('[API] Reading blob at:', jobsPath)
+          const jobs = await loadJobsFromBlob()
+          if (jobs) {
+            console.log('[API] Loaded', jobs.length, 'jobs from Blob')
+            return res.status(200).json({ jobs, storage: 'blob', found: true })
           }
+          console.log('[API] No blob found yet')
         } catch (err) {
-          console.warn('[API] Blob fetch failed, falling back to local file:', err.message)
+          console.warn('[API] Blob read failed, falling back to local file:', err.message)
         }
       }
 
-      // Fall back to local file-based storage
+      // Fall back to local file-based storage (local dev only — Vercel FS is ephemeral)
       const jobs = await loadJobsFromFile()
       console.log('[API] Loaded', jobs.length, 'jobs from local file')
       return res.status(200).json({ jobs, storage: 'file', found: jobs.length > 0 })
@@ -90,6 +124,10 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
+    // Writing the shared job list is admin-only.
+    if (!requireAuth(req)) {
+      return res.status(401).json({ error: 'Unauthorized — admin login required' })
+    }
     try {
       const { jobs } = req.body || {}
       if (!Array.isArray(jobs)) {
@@ -99,32 +137,35 @@ export default async function handler(req, res) {
 
       console.log('[API] Saving', jobs.length, 'jobs...')
       let savedToBlob = false
-      let savedToFile = false
+      let blobError = null
 
-      // Try to save to Vercel Blob if token is configured
-      if (process.env.BLOB_READ_WRITE_TOKEN) {
+      if (hasToken) {
         try {
-          console.log('[API] Attempting to save to Blob at:', jobsPath)
-          await put(jobsPath, JSON.stringify(jobs), {
-            access: 'public',
-            contentType: 'application/json',
-          })
+          await saveJobsToBlob(jobs)
           savedToBlob = true
           console.log('[API] Successfully saved to Blob')
         } catch (err) {
+          blobError = err.message
           console.error('[API] Failed to save to Blob:', err.message)
         }
       }
 
-      // Always save to local file as fallback
+      // Local file mirror — useful for local dev; ignored/ephemeral on Vercel.
       await saveJobsToFile(jobs)
-      savedToFile = true
-      console.log('[API] Saved to local file')
+
+      // On Vercel the file mirror does not persist, so a Blob failure is fatal there.
+      if (hasToken && !savedToBlob) {
+        return res.status(502).json({
+          error: 'Could not persist jobs to Blob storage: ' + (blobError || 'unknown error'),
+          savedToBlob: false,
+          savedToFile: true,
+        })
+      }
 
       return res.status(200).json({
         success: true,
         savedToBlob,
-        savedToFile,
+        savedToFile: true,
         storage: savedToBlob ? 'blob' : 'file',
       })
     } catch (err) {

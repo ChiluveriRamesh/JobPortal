@@ -1,8 +1,22 @@
+import crypto from 'crypto';
 import { put } from '@vercel/blob';
+import { requireAuth } from '../../lib/auth';
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '25mb',
+    },
+  },
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  if (!requireAuth(req)) {
+    return res.status(401).json({ error: 'Unauthorized — admin login required' });
   }
 
   try {
@@ -23,17 +37,26 @@ export default async function handler(req, res) {
       return res.status(413).json({ error: 'PDF is too large' });
     }
 
+    // Without a Blob token (pure local dev), fall back to an inline data URL.
     let pdfUrl = `data:${mimeType || 'application/pdf'};base64,${base64Data}`;
     let storage = 'data-url';
 
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const folder = (process.env.BLOB_FOLDER || 'uploads').replace(/^\/+|\/+$/g, '')
-      const remoteFilename = `${folder}/${filename || 'uploaded.pdf'}`
+      const folder = (process.env.BLOB_FOLDER || 'uploads').replace(/^\/+|\/+$/g, '');
+      const safeName = (filename || 'uploaded.pdf').replace(/[^\w.\-]+/g, '_');
+      // Content-hash the file so re-uploading the same PDF reuses the same blob
+      // (idempotent) instead of piling up duplicates.
+      const hash = crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
+      const remoteFilename = `${folder}/${hash}-${safeName}`;
       const uploadResult = await put(remoteFilename, payload, {
-        access: 'public',
-        contentType: mimeType || 'application/pdf'
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: mimeType || 'application/pdf',
       });
-      pdfUrl = uploadResult.url;
+      // Private blobs aren't publicly fetchable, so serve them through our own
+      // authenticated proxy route instead of the raw blob URL.
+      pdfUrl = `/api/pdf?path=${encodeURIComponent(uploadResult.pathname)}`;
       storage = 'vercel-blob';
     }
 

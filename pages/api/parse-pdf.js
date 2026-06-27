@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { requireAuth } from "../../lib/auth";
+import { hashText, readParseCache, writeParseCache } from "../../lib/blob-cache";
 
 export const config = {
   api: {
@@ -73,6 +75,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // Parsing calls the paid Claude API, so it is admin-only to prevent abuse.
+  if (!requireAuth(req)) {
+    return res.status(401).json({ error: "Unauthorized — admin login required" });
+  }
+
   try {
     const { text, filename } = req.body;
 
@@ -86,6 +93,14 @@ export default async function handler(req, res) {
     }
 
     const truncated = text.substring(0, 7000);
+
+    // If we've already parsed this exact content, reuse it instead of paying
+    // for another Claude call.
+    const cacheKey = hashText(truncated);
+    const cached = await readParseCache(cacheKey);
+    if (cached) {
+      return res.status(200).json({ jobs: cached, count: cached.length, cached: true });
+    }
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -120,6 +135,9 @@ export default async function handler(req, res) {
       vacancies: parseInt(j.vacancies) || 1,
       fromPdf: true,
     }));
+
+    // Cache the parsed result so re-uploading the same PDF skips the AI call.
+    await writeParseCache(cacheKey, jobs);
 
     return res.status(200).json({ jobs, count: jobs.length });
   } catch (err) {

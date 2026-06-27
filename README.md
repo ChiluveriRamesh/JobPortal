@@ -66,6 +66,20 @@ Before clicking Deploy:
 
 ---
 
+### Step 4b — Connect Vercel Blob (required for jobs to persist)
+
+Jobs are saved to **Vercel Blob** so they survive page refreshes and are shared across all visitors.
+
+1. In your Vercel project, open the **Storage** tab
+2. Click **Create Database → Blob → Create**
+3. Click **Connect** to attach it to this project
+
+Vercel automatically adds the `BLOB_READ_WRITE_TOKEN` environment variable. That's all that's needed — the app reads/writes the store through the SDK with that token.
+
+> Without `BLOB_READ_WRITE_TOKEN`, the app still runs but jobs are not persisted on Vercel (the serverless filesystem is ephemeral).
+
+---
+
 ### Step 5 — Deploy!
 
 Click **Deploy**. Vercel builds and deploys in ~60 seconds.
@@ -145,6 +159,8 @@ The Anthropic API key is **only** in Vercel's encrypted environment variables. I
 
 Supports any Indian government recruitment notification — UPSC, SSC, IBPS, RRB, State PSCs, police, teaching, medical, and more.
 
+**Caching:** parsed results are cached in Blob by a content hash, so re-uploading the same PDF returns instantly (`cached: true`) without a second paid Claude call. Identical PDF files are also stored idempotently (same content → same blob, no duplicates).
+
 ---
 
 ## ✏️ Customising
@@ -156,6 +172,8 @@ Supports any Indian government recruitment notification — UPSC, SSC, IBPS, RRB
 **Add a database:** Replace the in-memory `useState` in `pages/index.js` with API calls to a Vercel Postgres or Supabase database for persistent storage across sessions
 
 **Custom domain:** In Vercel dashboard → your project → Settings → Domains
+
+**Admin access & security:** All admin actions live at `/admin`. The public home page is read-only. Logging in calls `/api/admin-login`, which verifies credentials server-side and issues a signed session token; the write endpoints (`/api/jobs-store` PUT, `/api/upload-pdf`, `/api/parse-pdf`) reject any request without a valid token. **For production, set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_SESSION_SECRET` in Vercel** — otherwise it falls back to built-in defaults that are visible in the source history.
 
 ---
 
@@ -178,10 +196,10 @@ Supports any Indian government recruitment notification — UPSC, SSC, IBPS, RRB
 A: Yes. The free Hobby plan supports unlimited deployments, 100GB bandwidth/month, and serverless functions — more than enough to start.
 
 **Q: Will job data persist between page refreshes?**
-A: Currently jobs are stored in React state (in-memory). Refresh resets to seed data. To persist, add a database (Vercel Postgres is free up to 60 hours/month).
+A: Yes. Jobs are saved to **Vercel Blob** (a shared private store) via `/api/jobs-store` and reloaded on every page load, so they survive refreshes and redeploys. Requires `BLOB_READ_WRITE_TOKEN` to be set (see below).
 
 **Q: Can multiple users add jobs simultaneously?**
-A: Yes for uploading PDFs. But since data is in-memory per user session, users don't see each other's uploads. Add a shared database to make it multi-user persistent.
+A: Yes. All visitors read from and write to the same Blob store, so everyone sees the same jobs. Saves are last-write-wins on the full list, which is fine for a single admin; for heavy concurrent editing you'd want per-job writes or a database.
 
 **Q: How do I update the portal after deploying?**
 A: Push any change to your GitHub repo — Vercel auto-redeploys in ~30 seconds.
