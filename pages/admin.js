@@ -20,6 +20,7 @@ const DEFAULT_MANUAL_FORM = {
 }
 
 const STORAGE_KEY = 'jobportal-jobs'
+const JOBS_STORE_API = '/api/jobs-store'
 
 const ADMIN_CREDENTIALS = {
   username: 'ramesh',
@@ -41,15 +42,8 @@ export default function AdminPage() {
     if (typeof window !== 'undefined') {
       const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
       setIsLoggedIn(savedAuth === 'true')
-      const savedJobs = window.localStorage.getItem(STORAGE_KEY)
-      if (savedJobs) {
-        try {
-          setJobs(JSON.parse(savedJobs))
-        } catch (err) {
-          console.warn('Unable to parse saved jobs', err)
-        }
-      }
     }
+    loadJobs()
   }, [])
 
   useEffect(() => {
@@ -57,12 +51,6 @@ export default function AdminPage() {
       window.localStorage.setItem('jobportal-admin-auth', isLoggedIn ? 'true' : 'false')
     }
   }, [isLoggedIn])
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs))
-    }
-  }, [jobs])
 
   useEffect(() => {
     if (!toast) return
@@ -88,6 +76,52 @@ export default function AdminPage() {
     setForm({ username: '', password: '' })
     setError('')
     setToast('You have been logged out.')
+  }
+
+  async function loadJobs() {
+    try {
+      const res = await fetch(JOBS_STORE_API)
+      if (!res.ok) {
+        throw new Error('Shared job store unavailable')
+      }
+      const data = await res.json()
+      if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+        setJobs(data.jobs)
+        return
+      }
+    } catch (err) {
+      console.warn('Failed to load shared jobs:', err)
+    }
+
+    if (typeof window !== 'undefined') {
+      const savedJobs = window.localStorage.getItem(STORAGE_KEY)
+      if (savedJobs) {
+        try {
+          setJobs(JSON.parse(savedJobs))
+        } catch (err) {
+          console.warn('Unable to parse saved jobs fallback', err)
+        }
+      }
+    }
+  }
+
+  async function saveJobs(newJobs) {
+    try {
+      const res = await fetch(JOBS_STORE_API, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobs: newJobs })
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null)
+        throw new Error(errData?.error || 'Failed to save jobs')
+      }
+    } catch (err) {
+      console.warn('Shared job save failed:', err)
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newJobs))
+      }
+    }
   }
 
   function arrayBufferToBase64(buffer) {
@@ -158,7 +192,9 @@ export default function AdminPage() {
       if (!parseRes.ok) throw new Error('AI parsing failed')
       const parseData = await parseRes.json()
       const newItems = (parseData.jobs || []).map((job, index) => ({ ...job, id: Date.now() + index, fromPdf: true, pdfUrl: uploadData.pdfUrl }))
-      setJobs(prev => [...newItems, ...prev])
+      const updated = [...newItems, ...jobs]
+      setJobs(updated)
+      await saveJobs(updated)
       setProgress(100)
       setStatus(`Added ${newItems.length} job listing(s).`)
       setToast('PDF uploaded and processed successfully.')
@@ -172,7 +208,7 @@ export default function AdminPage() {
     }
   }
 
-  function handleManualSubmit(e) {
+  async function handleManualSubmit(e) {
     e.preventDefault()
     if (!manualForm.title.trim() || !manualForm.department.trim()) {
       setToast('Please enter a title and department.')
@@ -200,7 +236,9 @@ export default function AdminPage() {
       applicationLink: manualForm.applicationLink.trim() || ''
     }
 
-    setJobs(prev => [newJob, ...prev])
+    const updated = [newJob, ...jobs]
+    setJobs(updated)
+    await saveJobs(updated)
     setManualForm(DEFAULT_MANUAL_FORM)
     setToast('Job added successfully.')
   }

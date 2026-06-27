@@ -21,8 +21,6 @@ const TYPE_OPTIONS = [
   'Finance / Accounts','State PSC','Agriculture','Other'
 ]
 
-const STORAGE_KEY = 'jobportal-jobs'
-
 const DEFAULT_MANUAL_FORM = {
   title: '',
   department: '',
@@ -81,6 +79,7 @@ export default function Home() {
   const [adminForm, setAdminForm] = useState({ username: '', password: '' })
   const [adminError, setAdminError] = useState('')
   const [nextId, setNextId] = useState(200)
+  const [loadingJobs, setLoadingJobs] = useState(true)
   const [pendingUndo, setPendingUndo] = useState(null)
   const undoTimer = useRef()
   const fileInputRef = useRef()
@@ -131,15 +130,7 @@ export default function Home() {
     if (typeof window === 'undefined') return
     const savedAuth = window.localStorage.getItem('jobportal-admin-auth')
     if (savedAuth === 'true') setIsAdminAuthenticated(true)
-
-    const savedJobs = window.localStorage.getItem(STORAGE_KEY)
-    if (savedJobs) {
-      try {
-        setJobs(JSON.parse(savedJobs))
-      } catch (err) {
-        console.warn('Unable to parse saved jobs', err)
-      }
-    }
+    loadJobs()
   }, [])
 
   useEffect(() => {
@@ -147,10 +138,34 @@ export default function Home() {
     window.localStorage.setItem('jobportal-admin-auth', isAdminAuthenticated ? 'true' : 'false')
   }, [isAdminAuthenticated])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs))
-  }, [jobs])
+  async function loadJobs() {
+    try {
+      const res = await fetch('/api/jobs-store')
+      if (!res.ok) throw new Error('Unable to load jobs')
+      const data = await res.json()
+      if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+        setJobs(data.jobs)
+        const maxId = data.jobs.reduce((max, job) => Math.max(max, Number(job.id) || 0), 0)
+        setNextId(maxId + 1)
+      }
+    } catch (err) {
+      console.warn('Job store load failed:', err)
+    } finally {
+      setLoadingJobs(false)
+    }
+  }
+
+  async function saveJobs(newJobs) {
+    try {
+      await fetch('/api/jobs-store', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobs: newJobs })
+      })
+    } catch (err) {
+      console.warn('Job store save failed:', err)
+    }
+  }
 
   function addLog(msg, cls = '') {
     setLogs(prev => [...prev, { msg, cls }])
@@ -223,7 +238,9 @@ export default function Home() {
     let idCounter = nextId
     const newJobs = data.jobs.map(j => ({ ...j, id: idCounter++, pdfUrl }))
     setNextId(idCounter)
-    setJobs(prev => [...newJobs, ...prev])
+    const mergedJobs = [...newJobs, ...jobs]
+    setJobs(mergedJobs)
+    saveJobs(mergedJobs)
 
     setProgress(100)
     setProgressLabel(`Done! Added ${data.count} job(s) to the portal.`)
@@ -336,13 +353,19 @@ export default function Home() {
     setJobs(prev => {
       const removed = prev.find(job => job.id === jobId)
       if (!removed) return prev
+      const updated = prev.filter(job => job.id !== jobId)
       setPendingUndo(removed)
+      saveJobs(updated)
       showToast(
         'Job removed. Undo?','info',
         5000,
         'Undo',
         () => {
-          setJobs(current => [removed, ...current])
+          setJobs(current => {
+            const restored = [removed, ...current]
+            saveJobs(restored)
+            return restored
+          })
           setPendingUndo(null)
           setToast(null)
           setToastActionLabel('')
@@ -350,7 +373,7 @@ export default function Home() {
           showToast('Delete undone.', 'success', 2500)
         }
       )
-      return prev.filter(job => job.id !== jobId)
+      return updated
     })
   }
 
@@ -412,7 +435,11 @@ export default function Home() {
     }
 
     setNextId(prev => prev + 1)
-    setJobs(prev => [newJob, ...prev])
+    setJobs(prev => {
+      const updated = [newJob, ...prev]
+      saveJobs(updated)
+      return updated
+    })
     setUploadOpen(false)
     resetUpload()
     showToast(`Added job: ${newJob.title}`, 'success', 4000)
